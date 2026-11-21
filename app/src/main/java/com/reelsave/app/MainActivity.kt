@@ -21,11 +21,10 @@ import kotlin.concurrent.thread
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        const val DEFAULT_INSTANCE = "https://rude-lissy-usman62627-31f64484.apps.mistral.run/"
+        const val DEFAULT_SERVER = "https://modern-rebekkah-usman62627-a7dc2c5c.apps.mistral.run/"
     }
 
     private lateinit var etUrl: EditText
-    private lateinit var cbAudio: CheckBox
     private lateinit var btnDownload: Button
     private lateinit var progress: ProgressBar
     private lateinit var tvStatus: TextView
@@ -38,7 +37,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         etUrl = findViewById(R.id.etUrl)
-        cbAudio = findViewById(R.id.cbAudio)
         btnDownload = findViewById(R.id.btnDownload)
         progress = findViewById(R.id.progress)
         tvStatus = findViewById(R.id.tvStatus)
@@ -76,22 +74,23 @@ class MainActivity : AppCompatActivity() {
     private fun showSettings() {
         val pad = (20 * resources.displayMetrics.density).toInt()
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, 0) }
-        val etInstance = EditText(this).apply {
-            hint = "Instance URL"
-            setText(prefs.getString("instance", DEFAULT_INSTANCE))
+        val info = TextView(this).apply {
+            text = "TikTok, Instagram and X/Twitter work with no setup.\n\nFor Facebook, YouTube, Pinterest and others, add ONE optional provider:\n• a free FastSaver key (api.fastsaver.io), or\n• a cobalt instance URL."
         }
-        val etKey = EditText(this).apply {
-            hint = "API key (optional)"
-            setText(prefs.getString("apikey", ""))
-        }
-        box.addView(etInstance); box.addView(etKey)
+        val etYt = EditText(this).apply { hint = "yt-dlp server URL"; setText(prefs.getString("ytdlp_url", DEFAULT_SERVER)) }
+        val etFs = EditText(this).apply { hint = "FastSaver API key (optional)"; setText(prefs.getString("apikey", "")) }
+        val etCu = EditText(this).apply { hint = "Cobalt instance URL (optional)"; setText(prefs.getString("cobalt_url", "")) }
+        val etCk = EditText(this).apply { hint = "Cobalt API key (optional)"; setText(prefs.getString("cobalt_key", "")) }
+        box.addView(info); box.addView(etYt); box.addView(etFs); box.addView(etCu); box.addView(etCk)
         AlertDialog.Builder(this)
             .setTitle("Settings")
-            .setView(box)
+            .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("Save") { _, _ ->
                 prefs.edit()
-                    .putString("instance", etInstance.text.toString().trim().ifBlank { DEFAULT_INSTANCE })
-                    .putString("apikey", etKey.text.toString().trim())
+                    .putString("ytdlp_url", etYt.text.toString().trim())
+                    .putString("apikey", etFs.text.toString().trim())
+                    .putString("cobalt_url", etCu.text.toString().trim())
+                    .putString("cobalt_key", etCk.text.toString().trim())
                     .apply()
                 Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
             }
@@ -105,6 +104,10 @@ class MainActivity : AppCompatActivity() {
             tvStatus.text = "Please enter a valid link."
             return
         }
+        val ytUrl = prefs.getString("ytdlp_url", DEFAULT_SERVER) ?: ""
+        val key = prefs.getString("apikey", "") ?: ""
+        val cUrl = prefs.getString("cobalt_url", "") ?: ""
+        val cKey = prefs.getString("cobalt_key", "") ?: ""
         if (!ensureStorage()) return
 
         pickerList.removeAllViews()
@@ -112,29 +115,22 @@ class MainActivity : AppCompatActivity() {
         progress.visibility = View.VISIBLE
         btnDownload.isEnabled = false
 
-        val base = prefs.getString("instance", DEFAULT_INSTANCE) ?: DEFAULT_INSTANCE
-        val key = prefs.getString("apikey", "") ?: ""
-        val audio = cbAudio.isChecked
-
         thread {
-            val result = CobaltApi.request(base, key, link, audio)
+            val result = Resolver.resolve(ytUrl, key, cUrl, cKey, link)
             runOnUiThread {
                 progress.visibility = View.GONE
                 btnDownload.isEnabled = true
                 when (result) {
                     is ApiResult.Failure -> tvStatus.text = result.message
-                    is ApiResult.Single -> {
-                        val name = result.filename ?: ("reelsave_" + System.currentTimeMillis() + if (audio) ".mp3" else ".mp4")
-                        enqueue(result.url, name)
-                    }
+                    is ApiResult.Single ->
+                        enqueue(result.item.url, "reelsave_${System.currentTimeMillis()}.${result.item.ext}")
                     is ApiResult.Picker -> {
                         tvStatus.text = "Multiple items found. Tap to download:"
                         result.items.forEachIndexed { idx, item ->
-                            val ext = when (item.type) { "photo" -> "jpg"; "gif" -> "gif"; else -> "mp4" }
                             val b = Button(this).apply {
-                                text = "${item.type.replaceFirstChar { it.uppercase() }} ${idx + 1}"
+                                text = (if (item.ext == "jpg") "Photo " else "Video ") + (idx + 1)
                                 setOnClickListener {
-                                    enqueue(item.url, "reelsave_${System.currentTimeMillis()}_${idx + 1}.$ext")
+                                    enqueue(item.url, "reelsave_${System.currentTimeMillis()}_${idx + 1}.${item.ext}")
                                 }
                             }
                             pickerList.addView(b)
